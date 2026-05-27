@@ -84,6 +84,43 @@ def _save_backtest_results():
     except Exception as e:
         log.error(f"Fout bij opslaan backtest results: {e}")
 
+
+# -------------------------------
+# Coefficients persistence
+# -------------------------------
+COEF_FILE = "/config/pyscript/mlr_coefficients.json"
+_coef_data = {"coef": None, "meta": {}}
+
+def _load_coef():
+    global _coef_data
+    try:
+        with task.executor(open, COEF_FILE, "r") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                _coef_data = data
+    except FileNotFoundError:
+        _coef_data = {"coef": None, "meta": {}}
+    except Exception as e:
+        log.error(f"Fout bij laden coef: {e}")
+        _coef_data = {"coef": None, "meta": {}}
+
+def _save_coef(coef, meta: dict):
+    global _coef_data
+    _coef_data = {"coef": coef, "meta": meta}
+    try:
+        with task.executor(open, COEF_FILE, "w") as f:
+            json.dump(_coef_data, f)
+    except Exception as e:
+        log.error(f"Fout bij opslaan coef: {e}")
+
+def _get_coef():
+    """Return coef list or None if not trained yet."""
+    return _coef_data.get("coef")
+
+@time_trigger("startup")
+def _load_coef_on_startup():
+    _load_coef()
+
 # -------------------------------
 # MQTT helpers (discovery + state)
 # -------------------------------
@@ -1217,6 +1254,7 @@ def ned_mlr_train(start_date: str=None, end_date: str=None):
     }
 
     _publish_mqtt_discovery()
+    _save_coef(coef, meta)
     _mqtt_publish_coefficients(coef, meta)
 
     log.info("ned_mlr_train: klaar, coef gepubliceerd via MQTT")
@@ -1411,6 +1449,7 @@ def _ned_mlr_train_long_bg(s_day, e_day, batch_days):
             "n_chunks": total,
             "n_samples": len(y_all),
         }
+        _save_coef(coef, meta)
         _mqtt_publish_coefficients(coef, meta_coef)
 
         _mqtt_publish_progress("done", {
@@ -1436,11 +1475,10 @@ def ned_mlr_predict_7d(retain_days: int = 14):
     log.info("ned_mlr_predict_7d: start")
 
     # --- Load coefficients ---
-    coef_raw = state.get("sensor.ned_mlr_coefficients_2")
-    if not coef_raw:
+    coef = _get_coef()
+    if coef is None:
         log.error("Geen coef; run eerst pyscript.ned_mlr_train")
         return
-    coef = json.loads(coef_raw)
 
     # --- Load RMSE per horizon from global backtest results ---
     global _backtest_results
@@ -1790,11 +1828,10 @@ def ned_mlr_bootstrap_archive(days: int = 14):
     log.info(f"ned_mlr_bootstrap_archive: start voor {days} dagen")
 
     # --- Load coefficients ---
-    coef_raw = state.get("sensor.ned_mlr_coefficients_2")
-    if not coef_raw:
+    coef = _get_coef()
+    if coef is None:
         log.error("Geen coef; run eerst pyscript.ned_mlr_train")
         return
-    coef = json.loads(coef_raw)
 
     # --- Discovery ---
     ids = find_ned_ids()
