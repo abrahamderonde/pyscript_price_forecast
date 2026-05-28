@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 """
 Pyscript: NED MLR + ENTSO-E (direct REST API), kwartier-resolutie
@@ -11,6 +10,7 @@ Pyscript: NED MLR + ENTSO-E (direct REST API), kwartier-resolutie
 """
 
 import json
+import math
 import random
 import time
 import xml.etree.ElementTree as ET
@@ -19,70 +19,6 @@ from zoneinfo import ZoneInfo
 import requests
 import re
 from builtins import open
-
-
-# -------------------------------
-# Forecast archive persistence
-# -------------------------------
-
-FORECAST_ARCHIVE_FILE = "/config/pyscript/forecast_archive.json"
-_forecast_archive_days = {}
-
-def _load_forecast_archive():
-    """Laad forecast archive vanaf disk (async‑safe)."""
-    global _forecast_archive_days
-    try:
-        with task.executor(open, FORECAST_ARCHIVE_FILE, "r") as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                _forecast_archive_days = data
-            else:
-                _forecast_archive_days = {}
-        log.info("Forecast archive geladen vanaf disk")
-    except FileNotFoundError:
-        _forecast_archive_days = {}
-        log.info("Forecast archive bestand bestaat nog niet")
-    except Exception as e:
-        log.error(f"Fout bij laden forecast archive: {e}")
-        _forecast_archive_days = {}
-
-
-def _save_forecast_archive():
-    """Schrijf forecast archive naar disk (async‑safe)."""
-    try:
-        with task.executor(open, FORECAST_ARCHIVE_FILE, "w") as f:
-            json.dump(_forecast_archive_days, f)
-        log.info("Forecast archive opgeslagen naar disk")
-    except Exception as e:
-        log.error(f"Fout bij opslaan forecast archive: {e}")
-
-# -------------------------------
-# backtest results persistence
-# -------------------------------
-BACKTEST_FILE = "/config/pyscript/backtest_results.json"
-_backtest_results = {}
-
-def _load_backtest_results():
-    global _backtest_results
-    try:
-        with task.executor(open, BACKTEST_FILE, "r") as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                _backtest_results = data
-            else:
-                _backtest_results = {}
-    except FileNotFoundError:
-        _backtest_results = {}
-    except Exception as e:
-        log.error(f"Fout bij laden backtest results: {e}")
-        _backtest_results = {}
-
-def _save_backtest_results():
-    try:
-        with task.executor(open, BACKTEST_FILE, "w") as f:
-            json.dump(_backtest_results, f)
-    except Exception as e:
-        log.error(f"Fout bij opslaan backtest results: {e}")
 
 
 # -------------------------------
@@ -120,6 +56,70 @@ def _get_coef():
 @time_trigger("startup")
 def _load_coef_on_startup():
     _load_coef()
+
+
+# -------------------------------
+# Forecast archive persistence
+# -------------------------------
+
+FORECAST_ARCHIVE_FILE = "/config/pyscript/forecast_archive.json"
+_forecast_archive_days = {}
+
+def _load_forecast_archive():
+    """Laad forecast archive vanaf disk (async-safe)."""
+    global _forecast_archive_days
+    try:
+        with task.executor(open, FORECAST_ARCHIVE_FILE, "r") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                _forecast_archive_days = data
+            else:
+                _forecast_archive_days = {}
+        log.info("Forecast archive geladen vanaf disk")
+    except FileNotFoundError:
+        _forecast_archive_days = {}
+        log.info("Forecast archive bestand bestaat nog niet")
+    except Exception as e:
+        log.error(f"Fout bij laden forecast archive: {e}")
+        _forecast_archive_days = {}
+
+
+def _save_forecast_archive():
+    """Schrijf forecast archive naar disk (async-safe)."""
+    try:
+        with task.executor(open, FORECAST_ARCHIVE_FILE, "w") as f:
+            json.dump(_forecast_archive_days, f)
+        log.info("Forecast archive opgeslagen naar disk")
+    except Exception as e:
+        log.error(f"Fout bij opslaan forecast archive: {e}")
+
+# -------------------------------
+# Backtest results persistence
+# -------------------------------
+BACKTEST_FILE = "/config/pyscript/backtest_results.json"
+_backtest_results = {}
+
+def _load_backtest_results():
+    global _backtest_results
+    try:
+        with task.executor(open, BACKTEST_FILE, "r") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                _backtest_results = data
+            else:
+                _backtest_results = {}
+    except FileNotFoundError:
+        _backtest_results = {}
+    except Exception as e:
+        log.error(f"Fout bij laden backtest results: {e}")
+        _backtest_results = {}
+
+def _save_backtest_results():
+    try:
+        with task.executor(open, BACKTEST_FILE, "w") as f:
+            json.dump(_backtest_results, f)
+    except Exception as e:
+        log.error(f"Fout bij opslaan backtest results: {e}")
 
 # -------------------------------
 # MQTT helpers (discovery + state)
@@ -181,7 +181,6 @@ def _publish_mqtt_discovery():
             "unique_id": MQTT_SENSOR_COEF_ID,
             "state_topic": MQTT_SENSOR_COEF_STATE_TOPIC,
             "icon": "mdi:chart-line",
-            # state is JSON; extract 'value' as main state
             "value_template": "{{ value_json.value | default('unknown') }}",
             "json_attributes_topic": MQTT_SENSOR_COEF_STATE_TOPIC,
         }),
@@ -197,7 +196,6 @@ def _publish_mqtt_discovery():
             "unique_id": MQTT_SENSOR_PROGRESS_ID,
             "state_topic": MQTT_SENSOR_PROGRESS_STATE_TOPIC,
             "icon": "mdi:progress-clock",
-            # state is JSON; extract 'status' as main state
             "value_template": "{{ value_json.status | default('unknown') }}",
             "json_attributes_topic": MQTT_SENSOR_PROGRESS_STATE_TOPIC,
         }),
@@ -213,7 +211,6 @@ def _publish_mqtt_discovery():
             "unique_id": MQTT_SENSOR_FORECAST_ID,
             "state_topic": MQTT_SENSOR_FORECAST_STATE_TOPIC,
             "icon": "mdi:chart-bell-curve",
-            # The main state is the numeric forecast value
             "value_template": "{{ value_json.value | default('unknown') }}",
             "json_attributes_topic": MQTT_SENSOR_FORECAST_STATE_TOPIC,
         }),
@@ -229,7 +226,6 @@ def _publish_mqtt_discovery():
             "unique_id": MQTT_SENSOR_BACKTEST_ID,
             "state_topic": MQTT_SENSOR_BACKTEST_STATE_TOPIC,
             "icon": "mdi:chart-line",
-            # state is JSON; extract 'value' as main state
             "value_template": "{{ value_json.value | default('unknown') }}",
             "json_attributes_topic": MQTT_SENSOR_BACKTEST_STATE_TOPIC,
         }),
@@ -245,7 +241,6 @@ def _publish_mqtt_discovery():
             "unique_id": MQTT_SENSOR_FORECASTBAND_ID,
             "state_topic": MQTT_SENSOR_FORECASTBAND_STATE_TOPIC,
             "icon": "mdi:progress-clock",
-            # state is JSON; extract 'status' as main state
             "value_template": "{{ value_json.value | default('unknown') }}",
             "json_attributes_topic": MQTT_SENSOR_FORECASTBAND_STATE_TOPIC,
         }),
@@ -261,7 +256,6 @@ def _publish_mqtt_discovery():
             "unique_id": MQTT_SENSOR_FORECASTARCHIVE_ID,
             "state_topic": MQTT_SENSOR_FORECASTARCHIVE_STATE_TOPIC,
             "icon": "mdi:chart-bell-curve",
-            # The main state is the numeric forecast value
             "value_template": "{{ value_json.value | default('unknown') }}",
             "json_attributes_topic": MQTT_SENSOR_FORECASTARCHIVE_STATE_TOPIC,
         }),
@@ -269,7 +263,7 @@ def _publish_mqtt_discovery():
         retain=True,
     )
 
-    # 7 ned_mlr_backtest forcasted sensor
+    # 7 ned_mlr_backtest_forecasted sensor
     mqtt.publish(
         topic=MQTT_SENSOR_BACKTESTFORECASTED_CONFIG_TOPIC,
         payload=json.dumps({
@@ -277,13 +271,12 @@ def _publish_mqtt_discovery():
             "unique_id": MQTT_SENSOR_BACKTESTFORECASTED_ID,
             "state_topic": MQTT_SENSOR_BACKTESTFORECASTED_STATE_TOPIC,
             "icon": "mdi:chart-bell-curve",
-            # The main state is the numeric forecast value
             "value_template": "{{ value_json.value | default('unknown') }}",
             "json_attributes_topic": MQTT_SENSOR_BACKTESTFORECASTED_STATE_TOPIC,
         }),
         qos=1,
         retain=True,
-    )    
+    )
 
     _discovery_published = True
     log.info("NED MLR: MQTT discovery config published")
@@ -291,9 +284,7 @@ def _publish_mqtt_discovery():
 
 @time_trigger("startup")
 def ned_mlr_mqtt_discovery_startup():
-    """
-    Publish MQTT discovery config once at HA startup.
-    """
+    """Publish MQTT discovery config once at HA startup."""
     try:
         _publish_mqtt_discovery()
     except Exception as e:
@@ -305,18 +296,14 @@ def _load_archive_on_startup():
 
 @time_trigger("startup")
 def _load_backtest_on_startup():
-    _load_backtest_results()    
+    _load_backtest_results()
+
 
 def _mqtt_publish_coefficients(coef, meta: dict):
-    """
-    Publish coefficients + metadata to MQTT state topic.
-    """
-    payload = {
-        "value": coef,
-    }
+    """Publish coefficients + metadata to MQTT state topic."""
+    payload = {"value": coef}
     if meta:
         payload.update(meta)
-
     mqtt.publish(
         topic=MQTT_SENSOR_COEF_STATE_TOPIC,
         payload=json.dumps(payload),
@@ -326,16 +313,10 @@ def _mqtt_publish_coefficients(coef, meta: dict):
 
 
 def _mqtt_publish_progress(status: str, meta: dict = None):
-    """
-    Publish training progress + metadata to MQTT state topic.
-    'status' is a short string: started, running, done, error, etc.
-    """
-    payload = {
-        "status": status,
-    }
+    """Publish training progress to MQTT state topic."""
+    payload = {"status": status}
     if meta:
         payload.update(meta)
-
     mqtt.publish(
         topic=MQTT_SENSOR_PROGRESS_STATE_TOPIC,
         payload=json.dumps(payload),
@@ -344,79 +325,64 @@ def _mqtt_publish_progress(status: str, meta: dict = None):
     )
 
 def _mqtt_publish_forecast(value, meta: dict = None):
-    """
-    Publish price forecast + attributes to MQTT.
-    """
+    """Publish price forecast + attributes to MQTT."""
     payload = {"value": value}
     if meta:
         payload.update(meta)
-
     mqtt.publish(
         topic=MQTT_SENSOR_FORECAST_STATE_TOPIC,
         payload=json.dumps(payload),
         qos=1,
         retain=True,
-    )    
+    )
 
 def _mqtt_publish_backtest(value, meta: dict = None):
-    """
-    Publish price backtest + attributes to MQTT.
-    """
+    """Publish price backtest + attributes to MQTT."""
     payload = {"value": value}
     if meta:
         payload.update(meta)
-
     mqtt.publish(
         topic=MQTT_SENSOR_BACKTEST_STATE_TOPIC,
         payload=json.dumps(payload),
         qos=1,
         retain=True,
-    )    
+    )
 
 def _mqtt_publish_forecast_band(value, meta: dict = None):
-    """
-    Publish price forecast band+ attributes to MQTT.
-    """
+    """Publish price forecast band + attributes to MQTT."""
     payload = {"value": value}
     if meta:
         payload.update(meta)
-
     mqtt.publish(
         topic=MQTT_SENSOR_FORECASTBAND_STATE_TOPIC,
         payload=json.dumps(payload),
         qos=1,
         retain=True,
-    )    
+    )
 
 def _mqtt_publish_forecast_archive(value, meta: dict = None):
-    """
-    Publish price forecast archive + attributes to MQTT.
-    """
+    """Publish price forecast archive + attributes to MQTT."""
     payload = {"value": value}
     if meta:
         payload.update(meta)
-
     mqtt.publish(
         topic=MQTT_SENSOR_FORECASTARCHIVE_STATE_TOPIC,
         payload=json.dumps(payload),
         qos=1,
         retain=True,
-    )    
+    )
 
 def _mqtt_publish_backtest_forecasted(value, meta: dict = None):
-    """
-    Publish price forecast archive + attributes to MQTT.
-    """
+    """Publish backtest forecasted + attributes to MQTT."""
     payload = {"value": value}
     if meta:
         payload.update(meta)
-
     mqtt.publish(
         topic=MQTT_SENSOR_BACKTESTFORECASTED_STATE_TOPIC,
         payload=json.dumps(payload),
         qos=1,
         retain=True,
-    )    
+    )
 
 # -------------------------------
 # Config uit Pyscript apps
@@ -441,7 +407,7 @@ WIND_OFF_TYPE_ID    = 17
 CONSUMPTION_TYPE_ID = 59
 
 # -------------------------------
-# Helpers zonder generator-expressions
+# Helpers
 # -------------------------------
 def _parse_ts_any_to_local(ts_str: str):
     """
@@ -452,16 +418,13 @@ def _parse_ts_any_to_local(ts_str: str):
         return None
     s = ts_str.strip()
 
-    # 'Z' -> '+00:00'
     if s.endswith('Z'):
         s = s[:-1] + '+00:00'
 
-    # '+0100' / '-0530' -> '+01:00' / '-05:30'
     m = re.search(r'([+-])(\d{2})(\d{2})$', s)
-    if m and (':' not in s[-6:]):  # laatste 6 chars hebben geen ':'
+    if m and (':' not in s[-6:]):
         s = s[:-5] + f"{m.group(1)}{m.group(2)}:{m.group(3)}"
 
-    # parse als ISO, zo niet: fallback zonder offset
     dt = None
     try:
         dt = datetime.fromisoformat(s)
@@ -471,7 +434,6 @@ def _parse_ts_any_to_local(ts_str: str):
         except Exception:
             return None
 
-    # naar Europe/Amsterdam
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
     else:
@@ -482,7 +444,7 @@ def _parse_ts_any_to_local(ts_str: str):
 def _canonicalize_dict_keys(d: dict) -> dict:
     """
     Zet alle keys van {ts_str -> value} om naar uniforme ISO strings
-    (Europe/Amsterdam, seconds, mét offset).
+    (Europe/Amsterdam, seconds, met offset).
     """
     out = {}
     for k, v in d.items():
@@ -492,35 +454,40 @@ def _canonicalize_dict_keys(d: dict) -> dict:
     return out
 
 def contains_any(text, keywords):
-    """Return True als één van de keywords in text zit (case-insensitive downstream al toegepast)."""
+    """Return True als één van de keywords in text zit."""
     for k in keywords:
         if k in text:
             return True
     return False
 
+def _last(d):
+    """Geef de waarde van de laatste (gesorteerde) key in dict d, of 0.0 als leeg."""
+    if not d:
+        return 0.0
+    ks = sorted(d.keys())
+    return d[ks[-1]]
+
+def _zero_cons(solar, won, wof):
+    """Maak een consumption dict van nullen op de unie van timestamps."""
+    return {k: 0.0 for k in set(solar) | set(won) | set(wof)}
 
 def _metrics_no_gen(y_true, y_pred):
-    """
-    Bereken MAE, RMSE, R2 zonder generator expressions (Pyscript‑safe).
-    """
+    """Bereken MAE, RMSE, R2 zonder generator expressions (Pyscript-safe)."""
     n = len(y_true)
     if n == 0:
         return {"mae": None, "rmse": None, "r2": None}
 
-    # MAE
     s_abs = 0.0
     for i in range(n):
         s_abs += abs(y_true[i] - y_pred[i])
     mae = s_abs / n
 
-    # RMSE
     s_sq = 0.0
     for i in range(n):
         diff = y_true[i] - y_pred[i]
         s_sq += diff * diff
     rmse = (s_sq / n) ** 0.5
 
-    # R²
     s_true = 0.0
     for i in range(n):
         s_true += y_true[i]
@@ -541,6 +508,19 @@ def _metrics_no_gen(y_true, y_pred):
         r2 = 1.0 - (ss_res / ss_tot)
 
     return {"mae": mae, "rmse": rmse, "r2": r2}
+
+# -------------------------------
+# Time-of-day feature encoding
+# -------------------------------
+def _tod_features(ts_iso: str):
+    """
+    Sine/cosine time-of-day encoding voor een kwartier-timestamp.
+    k = kwartier-index 0..95; geeft (sin_tod, cos_tod) terug.
+    """
+    dt = datetime.fromisoformat(ts_iso)
+    k = dt.hour * 4 + dt.minute // 15
+    angle = 2.0 * math.pi * k / 96.0
+    return math.sin(angle), math.cos(angle)
 
 # -------------------------------
 # Pure-Python OLS (geen scikit)
@@ -581,7 +561,7 @@ def _gauss_jordan(A, b):
         for j in range(col, n+1):
             M[col][j] *= invp
         for r in range(n):
-            if r == col: 
+            if r == col:
                 continue
             fac = M[r][col]
             if fac != 0.0:
@@ -642,7 +622,6 @@ def _paged_get(url, params, max_pages=40, delay_s=0.25):
     for page in range(1, max_pages+1):
         p = dict(params)
         p["page"] = page
-        # blocking I/O via executor
         resp = task.executor(requests.get, url, params=p, headers=HEADERS_JSONLD, allow_redirects=False, timeout=30)
         if resp.status_code in (400, 403):
             break
@@ -668,7 +647,6 @@ def find_ned_ids():
     if not NED_KEY:
         log.error("NED key ontbreekt (apps-config).")
         return None
-    # points
     pts = _ned_get("points")
     pid_nl = None
     for p in pts:
@@ -679,7 +657,6 @@ def find_ned_ids():
     if pid_nl is None and pts:
         pid_nl = _iri_to_int(pts[0].get("id"))
 
-    # timezones
     tzs = _ned_get("granularity_time_zones")
     tz_id = None
     for tz in tzs:
@@ -689,7 +666,6 @@ def find_ned_ids():
     if tz_id is None and tzs:
         tz_id = _iri_to_int(tzs[0].get("id"))
 
-    # granularities
     gns = _ned_get("granularities")
     gran15 = gran60 = None
     for g in gns:
@@ -700,7 +676,6 @@ def find_ned_ids():
         if contains_any(nm, ["60", "pt60m", "uur", "hour"]):
             gran60 = gid
 
-    # activities
     acts = _ned_get("activities")
     act_prov = act_cons = None
     for a in acts:
@@ -713,7 +688,6 @@ def find_ned_ids():
     if act_prov is None and acts:
         act_prov = _iri_to_int(acts[0].get("id"))
 
-    # classifications
     cls = _ned_get("classifications")
     cls_cur = cls_back = cls_fore = None
     for c in cls:
@@ -760,7 +734,8 @@ def _items_to_rows(items):
 
 def fetch_ned_q15_range(start_date, end_date, type_id, activity_id, granularity_id, tz_id, point_ids, classification_id):
     """
-    Haal NED-utilizations op en return dict ts->value (Europe/Amsterdam; kwartier of upsample later)
+    Haal NED-utilizations op en return dict ts->value (Europe/Amsterdam).
+    Waarden worden gesommeerd over point_ids (correct voor wind aggregatie).
     """
     out = {}
     sdt = datetime.fromisoformat(start_date)
@@ -785,7 +760,7 @@ def fetch_ned_q15_range(start_date, end_date, type_id, activity_id, granularity_
             for ts, v in rows:
                 out[ts] = out.get(ts, 0.0) + v
         cur = chunk_end
-    return out  # ts in Europe/Amsterdam (NED levert local ISO)
+    return out
 
 def _upsample_hour_dict_to_q15_local(hour_dict):
     """
@@ -818,7 +793,6 @@ def _parse_publication_marketdocument(xml_text):
     """
     Parse ENTSO-E Publication_MarketDocument en retourneer
     lijst van (start_iso_utc, resolution_str, [(position, price)]).
-    Robuust voor tag 'price.amount' met punt in naam.
     """
     try:
         root = ET.fromstring(xml_text)
@@ -826,7 +800,6 @@ def _parse_publication_marketdocument(xml_text):
         log.error(f"ENTSO-E XML parse error: {e}")
         return []
 
-    # Zoek periode-interval (start)
     period_interval = None
     for el in root.iter():
         if _local_tag(el.tag) == "period.timeInterval":
@@ -842,14 +815,12 @@ def _parse_publication_marketdocument(xml_text):
             break
     if start_el is None or not start_el.text:
         return []
-    start = start_el.text  # bv. '2025-12-31T23:00Z'
+    start = start_el.text
 
     series = []
-    # Vind alle TimeSeries
     for ts in root.iter():
         if _local_tag(ts.tag) != "TimeSeries":
             continue
-        # Zoek Period + resolution
         period_el = None
         for ch in ts.iter():
             if _local_tag(ch.tag) == "Period":
@@ -865,7 +836,6 @@ def _parse_publication_marketdocument(xml_text):
                 break
 
         points = []
-        # Alle Point entries met position & price.amount
         for pt in period_el:
             if _local_tag(pt.tag) != "Point":
                 continue
@@ -878,7 +848,7 @@ def _parse_publication_marketdocument(xml_text):
                         pos = int(child.text)
                     except Exception:
                         pos = None
-                elif ltag == "price.amount":  # let op punt in tagnaam
+                elif ltag == "price.amount":
                     try:
                         price = float(child.text)
                     except Exception:
@@ -893,9 +863,7 @@ def _parse_publication_marketdocument(xml_text):
 
 
 def _series_to_q15_local(series_list):
-    """
-    Zet ENTSO-E (UTC) series om naar Europe/Amsterdam kwartieren.
-    """
+    """Zet ENTSO-E (UTC) series om naar Europe/Amsterdam kwartieren."""
     out = {}
     for start_iso_utc, res, points in series_list:
         dt0_utc = datetime.fromisoformat(start_iso_utc.replace("Z", "+00:00"))
@@ -922,16 +890,13 @@ def _entsoe_call(params, max_retries=6, base_sleep=0.6, hard_cap=8.0):
     for attempt in range(max_retries):
         try:
             resp = task.executor(requests.get, ENTSOE_API, params=params, timeout=30)
-            # 200 OK
             if resp.status_code == 200:
                 return resp.text
-            # 429 / 5xx -> backoff
             if resp.status_code in (429,) or 500 <= resp.status_code < 600:
                 wait = min((base_sleep * (2 ** attempt)) + random.uniform(0, 0.4), hard_cap)
                 log.warning(f"ENTSO-E {resp.status_code}, retry in {wait:.2f}s (attempt {attempt+1}/{max_retries})")
                 task.sleep(wait)
                 continue
-            # 4xx anders: geen retry
             log.error(f"ENTSO-E HTTP {resp.status_code}: {resp.text[:200]}")
             return None
         except Exception as e:
@@ -947,7 +912,7 @@ def _entsoe_call(params, max_retries=6, base_sleep=0.6, hard_cap=8.0):
 def fetch_entsoe_prices_q15_range_api(start_date: str, end_date: str, eic_code: str = EIC_NL) -> dict:
     """
     Directe ENTSO-E call voor A44/A01 prijzen, dag-voor-dag, met retry/backoff.
-    Normaliseert naar kwartier en Europe/Amsterdam. Slaat mislukte dagen over.
+    Normaliseert naar kwartier en Europe/Amsterdam.
     """
     if not ENTSOE_KEY:
         log.error("ENTSO-E key ontbreekt (apps-config).")
@@ -961,8 +926,8 @@ def fetch_entsoe_prices_q15_range_api(start_date: str, end_date: str, eic_code: 
         day_local_end   = day_local_start + timedelta(days=1)
         params = {
             "securityToken": ENTSOE_KEY,
-            "documentType": "A44",  # Price doc
-            "processType":  "A01",  # Day-ahead
+            "documentType": "A44",
+            "processType":  "A01",
             "in_Domain": eic_code,
             "out_Domain": eic_code,
             "periodStart": _to_utc_yyyymmddhhmm(day_local_start),
@@ -978,189 +943,65 @@ def fetch_entsoe_prices_q15_range_api(start_date: str, end_date: str, eic_code: 
                 log.warning(f"ENTSO-E: geen prijzen in XML voor {cur}")
         else:
             log.warning(f"ENTSO-E: dag {cur} overgeslagen (geen verbinding/HTTP-error)")
-        task.sleep(0.15)  # zacht throttle
+        task.sleep(0.15)
         cur = cur + timedelta(days=1)
     return out
 
 
 # -------------------------------
-# Feature builder (kwartier + lag1)
+# Feature builder
 # -------------------------------
-def build_feature_matrix_q15(solar, won, wof, cons):
-    # Alle dicts: ts_local_iso -> value
+def build_feature_matrix_q15(solar, won, wof, cons, prices=None):
+    """
+    Bouw feature matrix met:
+    [solar, won, wof, cons, sin_tod, cos_tod, lag_solar, lag_won, lag_wof, lag_cons, lag_price]
+
+    - sin_tod/cos_tod: cyclische tijd-van-dag encoding (kwartier 0..95)
+    - lag_*: vorige kwartier energie features
+    - lag_price: vorige kwartier prijs (uit prices dict of 0.0)
+
+    Total: 11 features per rij (+ intercept bij OLS fit).
+    """
     keys = sorted(set(solar) & set(won) & set(wof) & set(cons))
     X, idx = [], []
     for ts in keys:
-        X.append([solar[ts], won[ts], wof[ts], cons[ts]])
+        sin_tod, cos_tod = _tod_features(ts)
+        X.append([solar[ts], won[ts], wof[ts], cons[ts], sin_tod, cos_tod])
         idx.append(ts)
-    # lag1
+
+    # lag: vorige energie features (cols 0-3) + vorige prijs
+    # tod features (cols 4-5) worden NIET gelagd — tijd is deterministisch
     Xlag = []
     for i in range(len(X)):
         if i == 0:
-            Xlag.append(X[i] + [0.0,0.0,0.0,0.0])
+            prev_energy = [0.0, 0.0, 0.0, 0.0]
+            prev_price  = [0.0]
         else:
-            prev = X[i-1]
-            Xlag.append(X[i] + prev)
+            prev_energy = X[i-1][:4]
+            prev_price  = [prices.get(idx[i-1], 0.0) if prices else 0.0]
+        Xlag.append(X[i] + prev_energy + prev_price)
+
     return idx, Xlag
 
 
 # -------------------------------
-# forcast archive builder
+# Forecast archive builder
 # -------------------------------
-def _build_forecast_archive_days(
-    anchor_day,
-    coef,
-    hist_solar, hist_won, hist_wof, hist_cons,
-    tz_id, gran15, gran60,
-    act_prov, act_cons, cls_fore,
-    point_nl,
-    H,
-    latest_hist
-):
-    """
-    Bouwt forecast-archief per dag, in EUR/MWh.
-    - anchor_day: date()
-    - H: max horizon (int)
-    - latest_hist: laatste dag met ENTSO-E historie (date)
-    """
-
-    archive_by_day = {}
-
-    # Zorg dat anchor_day een date is
-    if isinstance(anchor_day, datetime):
-        anchor_date = anchor_day.date()
-    else:
-        anchor_date = anchor_day
-
-    # Forecast range
-    sdate = anchor_date.isoformat()
-    max_end = min(anchor_date + timedelta(days=H), latest_hist + timedelta(days=1))
-    edate = max_end.isoformat()
-
-    # Forecast features
-    solar15 = fetch_ned_q15_range(sdate, edate, SOLAR_TYPE_ID, act_prov, gran15, tz_id, [point_nl], cls_fore)
-    won15   = fetch_ned_q15_range(sdate, edate, WIND_ON_TYPE_ID, act_prov, gran15, tz_id, [point_nl, 36, 14], cls_fore)
-    wof15   = fetch_ned_q15_range(sdate, edate, WIND_OFF_TYPE_ID, act_prov, gran15, tz_id, [point_nl, 36, 14], cls_fore)
-    cons15  = fetch_ned_q15_range(sdate, edate, CONSUMPTION_TYPE_ID, act_cons, gran15, tz_id, [point_nl], cls_fore) if act_cons else {}
-
-    # fallback 60m
-    if not solar15 and gran60:
-        solar15 = _upsample_hour_dict_to_q15_local(
-            fetch_ned_q15_range(sdate, edate, SOLAR_TYPE_ID, act_prov, gran60, tz_id, [point_nl], cls_fore)
-        )
-    if not won15 and gran60:
-        won15 = _upsample_hour_dict_to_q15_local(
-            fetch_ned_q15_range(sdate, edate, WIND_ON_TYPE_ID, act_prov, gran60, tz_id, [point_nl, 36, 14], cls_fore)
-        )
-    if not wof15 and gran60:
-        wof15 = _upsample_hour_dict_to_q15_local(
-            fetch_ned_q15_range(sdate, edate, WIND_OFF_TYPE_ID, act_prov, gran60, tz_id, [point_nl, 36, 14], cls_fore)
-        )
-    if not cons15 and gran60 and act_cons:
-        cons15 = _upsample_hour_dict_to_q15_local(
-            fetch_ned_q15_range(sdate, edate, CONSUMPTION_TYPE_ID, act_cons, gran60, tz_id, [point_nl], cls_fore)
-        )
-
-    if not solar15 or not won15 or not wof15:
-        return {}
-
-    if not cons15:
-        cons15 = {}
-        keys_union = set()
-        for d in (solar15, won15, wof15):
-            for k in d.keys():
-                keys_union.add(k)
-        for k in keys_union:
-            cons15[k] = 0.0
-
-    # Normaliseer keys
-    solar15 = _canonicalize_dict_keys(solar15)
-    won15   = _canonicalize_dict_keys(won15)
-    wof15   = _canonicalize_dict_keys(wof15)
-    cons15  = _canonicalize_dict_keys(cons15)
-
-    # Feature matrix
-    f_idx, Xf = build_feature_matrix_q15(solar15, won15, wof15, cons15)
-
-    # Lag seed
-    def _last(d):
-        if not d:
-            return 0.0
-        ks = list(d.keys())
-        ks.sort()
-        return d[ks[-1]]
-
-    seed = [
-        _last(hist_solar),
-        _last(hist_won),
-        _last(hist_wof),
-        _last(hist_cons) if hist_cons else 0.0
-    ]
-
-    for i in range(len(Xf)):
-        if i == 0:
-            for j in range(4, len(Xf[i])):
-                Xf[i][j] = seed[j - 4]
-        else:
-            for j in range(4, len(Xf[i])):
-                Xf[i][j] = Xf[i - 1][j - 4]
-
-    # Voorspelling (EUR/MWh)
-    yhat = ols_predict(Xf, coef, add_intercept=True)
-
-    now_iso = datetime.now().isoformat(timespec="seconds")
-
-    for i in range(len(f_idx)):
-        ts = f_idx[i]
-        dt_start = datetime.fromisoformat(ts)
-        dt_end   = dt_start + timedelta(minutes=15)
-
-        local_start = dt_start.isoformat()
-        local_end   = dt_end.isoformat()
-
-        center_eur_mwh = float(yhat[i])
-
-        pred_date = dt_start.date()
-        horizon = (pred_date - anchor_date).days + 1
-        if horizon < 1:
-            horizon = 1
-        if horizon > H:
-            horizon = H
-
-        day_key = pred_date.isoformat()
-        if day_key not in archive_by_day:
-            archive_by_day[day_key] = {
-                "generated_at": now_iso,
-                "data": []
-            }
-
-        archive_by_day[day_key]["data"].append({
-            "start": local_start,
-            "end": local_end,
-            "center": center_eur_mwh,
-            "horizon": horizon
-        })
-
-    return archive_by_day
-
 def archive_add_forecast(day_key, anchor_day, horizon, entries):
     global _forecast_archive_days
 
-    # Dag bestaat nog niet → maak volledige structuur
     if day_key not in _forecast_archive_days:
         _forecast_archive_days[day_key] = {"forecasts": []}
 
-    # Dag bestaat wel maar zonder forecasts → maak forecasts-array
     if "forecasts" not in _forecast_archive_days[day_key]:
         _forecast_archive_days[day_key]["forecasts"] = []
 
-    # Voeg toe
     _forecast_archive_days[day_key]["forecasts"].append({
         "anchor": anchor_day,
         "horizon": horizon,
         "data": entries
     })
-    
+
 def archive_prune(retain_days=14):
     global _forecast_archive_days
 
@@ -1186,6 +1027,7 @@ def archive_prune(retain_days=14):
 def ned_mlr_train(start_date: str=None, end_date: str=None):
     """
     Train MLR op kwartier (NED features + ENTSO-E prijzen direct via REST).
+    Features: [solar, won, wof, cons, sin_tod, cos_tod, lag_solar, lag_won, lag_wof, lag_cons, lag_price]
     """
     log.info("ned_mlr_train: start")
     ids = find_ned_ids()
@@ -1203,7 +1045,6 @@ def ned_mlr_train(start_date: str=None, end_date: str=None):
     end_date   = end_date or today.isoformat()
     start_date = start_date or (today - timedelta(days=90)).isoformat()
 
-    # NED kwartier (current/backcast; neem één classificatie die beschikbaar is)
     cls_hist = cls_cur if cls_cur is not None else cls_back
     solar = fetch_ned_q15_range(start_date, end_date, SOLAR_TYPE_ID, act_prov, gran15, tz_id, [point_nl], cls_hist)
     won   = fetch_ned_q15_range(start_date, end_date, WIND_ON_TYPE_ID, act_prov, gran15, tz_id, [point_nl, 36, 14], cls_hist)
@@ -1213,28 +1054,19 @@ def ned_mlr_train(start_date: str=None, end_date: str=None):
     if act_cons is not None:
         cons = fetch_ned_q15_range(start_date, end_date, CONSUMPTION_TYPE_ID, act_cons, gran15, tz_id, [point_nl], cls_hist)
     if not cons:
-        cons = {ts: 0.0 for ts in set(solar) | set(won) | set(wof)}
-    
-    # normalize times
+        cons = _zero_cons(solar, won, wof)
+
     solar = _canonicalize_dict_keys(solar)
     won   = _canonicalize_dict_keys(won)
     wof   = _canonicalize_dict_keys(wof)
     cons  = _canonicalize_dict_keys(cons)
 
-    # ENTSO-E prijzen direct via REST (kwartier + Europe/Amsterdam)
     prices_q15 = fetch_entsoe_prices_q15_range_api(start_date, end_date, eic_code=EIC_NL)
     prices_q15 = _canonicalize_dict_keys(prices_q15)
-    
-    # Debug: laat aantallen zien
-    log.info(f"TRAIN: solar={len(solar)}, won={len(won)}, wof={len(wof)}, cons={len(cons)}, prices_q15={len(prices_q15)}")
-    if prices_q15:
-        # Laat 3 voorbeeld timestamps zien
-        eg_ts = list(prices_q15.keys())[:3]
-        log.info(f"TRAIN: sample ENTSO-E ts={eg_ts}")
-    
 
-    # Matrix + target aligneren
-    idx, X = build_feature_matrix_q15(solar, won, wof, cons)
+    log.info(f"TRAIN: solar={len(solar)}, won={len(won)}, wof={len(wof)}, cons={len(cons)}, prices_q15={len(prices_q15)}")
+
+    idx, X = build_feature_matrix_q15(solar, won, wof, cons, prices=prices_q15)
     y = [prices_q15.get(ts) for ts in idx]
     X2, y2 = [], []
     for i, yi in enumerate(y):
@@ -1245,10 +1077,16 @@ def ned_mlr_train(start_date: str=None, end_date: str=None):
         log.error("Geen overlap features/prijzen; controleer ENTSO-E key of datumbereik.")
         return
 
-    coef = ols_fit(X2, y2, add_intercept=True)
+    try:
+        coef = ols_fit(X2, y2, add_intercept=True)
+    except ValueError as e:
+        log.error(f"ned_mlr_train: OLS fit mislukt: {e}")
+        _publish_mqtt_discovery()
+        _mqtt_publish_progress("error", {"msg": str(e)})
+        return
 
     meta = {
-        "features": ["solar","wind_on","wind_off","cons","lag_solar","lag_won","lag_wof","lag_cons"],
+        "features": ["solar","wind_on","wind_off","cons","sin_tod","cos_tod","lag_solar","lag_won","lag_wof","lag_cons","lag_price"],
         "start": start_date,
         "end": end_date,
     }
@@ -1257,19 +1095,15 @@ def ned_mlr_train(start_date: str=None, end_date: str=None):
     _save_coef(coef, meta)
     _mqtt_publish_coefficients(coef, meta)
 
-    log.info("ned_mlr_train: klaar, coef gepubliceerd via MQTT")
+    log.info("ned_mlr_train: klaar, coef opgeslagen en gepubliceerd via MQTT")
 
 
 @service
 def ned_mlr_train_long(start_date: str = None, end_date: str = None, batch_days: int = 30):
     """
     Hybride training: splitst [start_date, end_date) in batches en traint in een background task.
-    - start_date / end_date: ISO 'YYYY-MM-DD'; default: laatste 180 dagen tot vandaag.
-    - batch_days: aantal dagen per batch (default 30).
-    Voortgang in sensor.ned_mlr_train_progress; uiteindelijke coefs in sensor.ned_mlr_coeff.
     """
     try:
-        # Valideer batch_days
         try:
             batch_days = int(batch_days)
         except Exception:
@@ -1279,14 +1113,12 @@ def ned_mlr_train_long(start_date: str = None, end_date: str = None, batch_days:
         if batch_days > 60:
             batch_days = 60
 
-        # Defaults voor datumbereik
         today = datetime.now(tz=ZoneInfo("Europe/Amsterdam")).date()
         if not end_date:
             end_date = today.isoformat()
         if not start_date:
             start_date = (today - timedelta(days=180)).isoformat()
 
-        # Parse en normaliseer (half-open eind: [start, end))
         s_day = datetime.fromisoformat(start_date).date()
         e_day = datetime.fromisoformat(end_date).date()
         if e_day <= s_day:
@@ -1299,7 +1131,6 @@ def ned_mlr_train_long(start_date: str = None, end_date: str = None, batch_days:
             })
             return
 
-        # Fire-and-forget: background task starten
         task.create(_ned_mlr_train_long_bg, s_day, e_day, batch_days)
         _publish_mqtt_discovery()
         _mqtt_publish_progress("started", {
@@ -1316,9 +1147,7 @@ def ned_mlr_train_long(start_date: str = None, end_date: str = None, batch_days:
 
 
 def _date_chunks(s_day, e_day, batch_days):
-    """
-    Maak lijst van (chunk_start, chunk_end) datums; half-open [start, end)
-    """
+    """Maak lijst van (chunk_start, chunk_end) datums; half-open [start, end)."""
     chunks = []
     cur = s_day
     while cur < e_day:
@@ -1338,8 +1167,7 @@ def _append_xy(X_acc, y_acc, solar, won, wof, cons, prices):
     """
     Bouw features/target per batch en append de overlappende voorbeelden aan X_acc, y_acc.
     """
-    idx, X = build_feature_matrix_q15(solar, won, wof, cons)
-    # Align met prijzen
+    idx, X = build_feature_matrix_q15(solar, won, wof, cons, prices=prices)
     for i, ts in enumerate(idx):
         yi = prices.get(ts)
         if yi is not None:
@@ -1352,9 +1180,7 @@ def _sum_len_dicts(*dicts):
 
 
 def _ned_mlr_train_long_bg(s_day, e_day, batch_days):
-    """
-    Background task: haalt batches op, bouwt 1 grote trainingsset, fit OLS, schrijft coefs.
-    """
+    """Background task: haalt batches op, bouwt trainingsset, fit OLS, schrijft coefs."""
     try:
         _publish_mqtt_discovery()
         _mqtt_publish_progress("running", {
@@ -1365,7 +1191,6 @@ def _ned_mlr_train_long_bg(s_day, e_day, batch_days):
             "total": 0,
         })
 
-        # NED discovery (1x)
         ids = find_ned_ids()
         if not ids:
             _mqtt_publish_progress("error", {"msg": "find_ned_ids faalde"})
@@ -1382,13 +1207,11 @@ def _ned_mlr_train_long_bg(s_day, e_day, batch_days):
         total = len(chunks)
         done = 0
 
-        # Accumulators (zonder alles in geheugen te houden; we bouwen X/y per batch en voegen toe)
         X_all, y_all = [], []
 
         for (c_start, c_end) in chunks:
             cs, ce = c_start.isoformat(), c_end.isoformat()
 
-            # NED kwartier: current/backcast (historische features)
             solar = fetch_ned_q15_range(cs, ce, SOLAR_TYPE_ID, act_prov, gran15, tz_id, [point_nl], cls_cur)
             won   = fetch_ned_q15_range(cs, ce, WIND_ON_TYPE_ID, act_prov, gran15, tz_id, [point_nl, 36, 14], cls_cur)
             wof   = fetch_ned_q15_range(cs, ce, WIND_OFF_TYPE_ID, act_prov, gran15, tz_id, [point_nl, 36, 14], cls_cur)
@@ -1396,26 +1219,20 @@ def _ned_mlr_train_long_bg(s_day, e_day, batch_days):
             if act_cons is not None:
                 cons = fetch_ned_q15_range(cs, ce, CONSUMPTION_TYPE_ID, act_cons, gran15, tz_id, [point_nl], cls_cur)
 
-            # ENTSO-E prijzen kwartier (Europe/Amsterdam), direct via REST
             prices_q15 = fetch_entsoe_prices_q15_range_api(cs, ce, eic_code=EIC_NL)
 
-            # Normaliseer sleutels
-            solar = _safe_canon(solar)
-            won   = _safe_canon(won)
-            wof   = _safe_canon(wof)
-            cons  = _safe_canon(cons)
+            solar      = _safe_canon(solar)
+            won        = _safe_canon(won)
+            wof        = _safe_canon(wof)
+            cons       = _safe_canon(cons)
             prices_q15 = _safe_canon(prices_q15)
 
-            # Indien geen verbruik: vul 0's op de unie van andere keys
             if not cons:
-                all_ts = set(solar) | set(won) | set(wof)
-                cons = {ts: 0.0 for ts in all_ts}
+                cons = _zero_cons(solar, won, wof)
 
-            # Append overlappende voorbeelden
             _append_xy(X_all, y_all, solar, won, wof, cons, prices_q15)
 
             done += 1
-            # Voortgang updaten
             _mqtt_publish_progress(f"running:{done}/{total}", {
                 "start": s_day.isoformat(),
                 "end": e_day.isoformat(),
@@ -1426,10 +1243,8 @@ def _ned_mlr_train_long_bg(s_day, e_day, batch_days):
                 "last_sizes": _sum_len_dicts(solar, won, wof, cons, prices_q15),
                 "n_samples_total": len(y_all),
             })
-            # Zachte throttle tussen batches
             task.sleep(0.25)
 
-        # Fitten op de samengestelde set
         if not X_all:
             log.error("ned_mlr_train_long: geen overlap features/prijzen over alle batches.")
             _mqtt_publish_progress("error", {
@@ -1438,18 +1253,22 @@ def _ned_mlr_train_long_bg(s_day, e_day, batch_days):
             })
             return
 
-        coef = ols_fit(X_all, y_all, add_intercept=True)
+        try:
+            coef = ols_fit(X_all, y_all, add_intercept=True)
+        except ValueError as e:
+            log.error(f"ned_mlr_train_long: OLS fit mislukt: {e}")
+            _mqtt_publish_progress("error", {"msg": str(e)})
+            return
 
-        # Opslaan coefs met metadata
         meta_coef = {
-            "features": ["solar","wind_on","wind_off","cons","lag_solar","lag_won","lag_wof","lag_cons"],
+            "features": ["solar","wind_on","wind_off","cons","sin_tod","cos_tod","lag_solar","lag_won","lag_wof","lag_cons","lag_price"],
             "start": s_day.isoformat(),
             "end": e_day.isoformat(),
             "batch_days": batch_days,
             "n_chunks": total,
             "n_samples": len(y_all),
         }
-        _save_coef(coef, meta)
+        _save_coef(coef, meta_coef)
         _mqtt_publish_coefficients(coef, meta_coef)
 
         _mqtt_publish_progress("done", {
@@ -1474,7 +1293,7 @@ def _ned_mlr_train_long_bg(s_day, e_day, batch_days):
 def ned_mlr_predict_7d(retain_days: int = 14):
     log.info("ned_mlr_predict_7d: start")
 
-    # --- Load coefficients ---
+    # --- Load coefficients from file ---
     coef = _get_coef()
     if coef is None:
         log.error("Geen coef; run eerst pyscript.ned_mlr_train")
@@ -1532,12 +1351,7 @@ def ned_mlr_predict_7d(retain_days: int = 14):
         return
 
     if not cons15:
-        cons15 = {}
-        keys_union = set()
-        for d in (solar15, won15, wof15):
-            keys_union.update(d.keys())
-        for k in keys_union:
-            cons15[k] = 0.0
+        cons15 = _zero_cons(solar15, won15, wof15)
 
     # Normalize
     solar15 = _canonicalize_dict_keys(solar15)
@@ -1550,44 +1364,46 @@ def ned_mlr_predict_7d(retain_days: int = 14):
     h_sdate = hist_start.date().isoformat()
     h_edate = anchor_day.isoformat()
 
-    hist_solar = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, SOLAR_TYPE_ID, act_prov, gran15, tz_id, [point_nl], cls_hist))
-    hist_won   = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, WIND_ON_TYPE_ID, act_prov, gran15, tz_id, [point_nl, 36, 14], cls_hist))
-    hist_wof   = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, WIND_OFF_TYPE_ID, act_prov, gran15, tz_id, [point_nl, 36, 14], cls_hist))
-    hist_cons  = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, CONSUMPTION_TYPE_ID, act_cons, gran15, tz_id, [point_nl], cls_hist)) if act_cons else {}
+    hist_solar  = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, SOLAR_TYPE_ID, act_prov, gran15, tz_id, [point_nl], cls_hist))
+    hist_won    = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, WIND_ON_TYPE_ID, act_prov, gran15, tz_id, [point_nl, 36, 14], cls_hist))
+    hist_wof    = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, WIND_OFF_TYPE_ID, act_prov, gran15, tz_id, [point_nl, 36, 14], cls_hist))
+    hist_cons   = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, CONSUMPTION_TYPE_ID, act_cons, gran15, tz_id, [point_nl], cls_hist)) if act_cons else {}
+    hist_prices = _canonicalize_dict_keys(fetch_entsoe_prices_q15_range_api(h_sdate, h_edate, eic_code=EIC_NL))
 
-    # --- Build feature matrix ---
+    # --- Build feature matrix (prices=None; lags worden manueel gezaaid) ---
     idx, Xf = build_feature_matrix_q15(solar15, won15, wof15, cons15)
 
-    def _last(d):
-        if not d:
-            return 0.0
-        ks = sorted(d.keys())
-        return d[ks[-1]]
-
-    seed = [
+    # --- Seed eerste rij vanuit gisteren ---
+    seed_features = [
         _last(hist_solar),
         _last(hist_won),
         _last(hist_wof),
-        _last(hist_cons) if hist_cons else 0.0
+        _last(hist_cons) if hist_cons else 0.0,
     ]
+    seed_price = _last(hist_prices)
 
+    # Row layout: [solar(0), won(1), wof(2), cons(3), sin_tod(4), cos_tod(5),
+    #              lag_solar(6), lag_won(7), lag_wof(8), lag_cons(9), lag_price(10)]
+    Xf[0][6:10] = seed_features
+    Xf[0][10]   = seed_price
+
+    # --- Autoregressive prediction loop ---
+    # Elke stap: lag_energy = vorige rij cols 0-3; lag_price = vorige voorspelling
+    yhat_eur_mwh = []
     for i in range(len(Xf)):
-        if i == 0:
-            for j in range(4, len(Xf[i])):
-                Xf[i][j] = seed[j - 4]
-        else:
-            for j in range(4, len(Xf[i])):
-                Xf[i][j] = Xf[i - 1][j - 4]
-
-    # --- Predict (EUR/MWh) ---
-    yhat_eur_mwh = ols_predict(Xf, coef, add_intercept=True)
+        if i > 0:
+            for j in range(4):
+                Xf[i][6 + j] = Xf[i-1][j]
+            Xf[i][10] = yhat_eur_mwh[i-1]
+        pred = ols_predict([Xf[i]], coef, add_intercept=True)[0]
+        yhat_eur_mwh.append(pred)
 
     # --- Tax / toeslag ---
     nordpool_attrs = state.getattr("sensor.nordpool_electricity_prices") or {}
     tax = float(nordpool_attrs.get("tax", 1.21))
     additional_cost = float(nordpool_attrs.get("additional_cost", 0.13276))
 
-    # --- Archive entries per horizon (center only) ---
+    # --- Archive entries per horizon (center only, in EUR/MWh) ---
     for i, ts in enumerate(idx):
         dt_start = datetime.fromisoformat(ts).astimezone(tz)
         dt_end   = dt_start + timedelta(minutes=15)
@@ -1610,7 +1426,7 @@ def ned_mlr_predict_7d(retain_days: int = 14):
 
     archive_prune(retain_days)
 
-    # --- Build flattened forecast for MQTT DIRECT uit voorspelling ---
+    # --- Build flattened forecast for MQTT ---
     flat_entries = []
     last_price = None
 
@@ -1619,7 +1435,6 @@ def ned_mlr_predict_7d(retain_days: int = 14):
         pred_eur_mwh = float(yhat_eur_mwh[i])
         pred_date = dt_start.date()
 
-        # horizon bepalen
         horizon = (pred_date - anchor_day).days + 1
         if horizon < 1 or horizon > 7:
             continue
@@ -1637,11 +1452,9 @@ def ned_mlr_predict_7d(retain_days: int = 14):
         price_lower  = conv(lower_mwh)
         price_upper  = conv(upper_mwh)
 
-        # last_price direct bepalen
         if horizon == 1:
             last_price = price_center
 
-        # alleen de benodigde velden opslaan
         flat_entries.append({
             "start": dt_start.isoformat(),
             "price_center": price_center,
@@ -1649,7 +1462,6 @@ def ned_mlr_predict_7d(retain_days: int = 14):
             "price_upper": price_upper,
         })
 
-    # sorteer alles op tijd
     flat_entries.sort(key=lambda x: x["start"])
 
     payload = {
@@ -1667,7 +1479,7 @@ def ned_mlr_predict_7d(retain_days: int = 14):
     log.info("ned_mlr_predict_7d: klaar")
 
 # -------------------------------
-# BACKTEST nieuw(per horizon D+1..D+H)
+# BACKTEST (per horizon D+1..D+7)
 # -------------------------------
 @service
 def ned_mlr_backtest_forecasted(start_date: str = None, end_date: str = None):
@@ -1684,7 +1496,6 @@ def ned_mlr_backtest_forecasted(start_date: str = None, end_date: str = None):
         log.error("Forecast-archief leeg; run predict_7d eerst.")
         return
 
-    # --- Verzamel alle doeldatums ---
     all_dates = []
     for d in days.keys():
         try:
@@ -1698,7 +1509,6 @@ def ned_mlr_backtest_forecasted(start_date: str = None, end_date: str = None):
 
     all_dates.sort()
 
-    # --- Bepaal analyse-range ---
     if start_date:
         try:
             s_day = datetime.fromisoformat(start_date).date()
@@ -1715,7 +1525,6 @@ def ned_mlr_backtest_forecasted(start_date: str = None, end_date: str = None):
     else:
         e_day = all_dates[-1]
 
-    # Alleen dagen met echte prijzen
     if e_day > latest_hist:
         e_day = latest_hist
 
@@ -1723,12 +1532,10 @@ def ned_mlr_backtest_forecasted(start_date: str = None, end_date: str = None):
         _mqtt_publish_backtest_forecasted("ok:0", {"msg": "geen historische dagen"})
         return
 
-    # --- Aggregatie per horizon ---
     agg = {}
     for h in range(1, 8):
         agg[h] = {"mae": [], "rmse": [], "r2": [], "dates": []}
 
-    # --- Loop over alle doeldatums ---
     cur = s_day
     while cur <= e_day:
         dkey = cur.isoformat()
@@ -1738,7 +1545,6 @@ def ned_mlr_backtest_forecasted(start_date: str = None, end_date: str = None):
             cur += timedelta(days=1)
             continue
 
-        # --- Echte prijzen ophalen ---
         true_day = fetch_entsoe_prices_q15_range_api(
             cur.isoformat(),
             (cur + timedelta(days=1)).isoformat(),
@@ -1746,7 +1552,6 @@ def ned_mlr_backtest_forecasted(start_date: str = None, end_date: str = None):
         )
         true_day = _canonicalize_dict_keys(true_day)
 
-        # --- Per horizon voorspellingen verzamelen ---
         preds_by_h = {h: [] for h in range(1, 8)}
         trues_by_h = {h: [] for h in range(1, 8)}
 
@@ -1769,7 +1574,6 @@ def ned_mlr_backtest_forecasted(start_date: str = None, end_date: str = None):
                 preds_by_h[h].append(pred)
                 trues_by_h[h].append(true)
 
-        # --- Metrics per horizon ---
         for h in range(1, 8):
             yp = preds_by_h[h]
             yt = trues_by_h[h]
@@ -1785,21 +1589,20 @@ def ned_mlr_backtest_forecasted(start_date: str = None, end_date: str = None):
 
         cur += timedelta(days=1)
 
-    # --- Samenvatting ---
     summary = {}
     counted = 0
 
     for h in range(1, 8):
-        mae_list = agg[h]["mae"]
+        mae_list  = agg[h]["mae"]
         rmse_list = agg[h]["rmse"]
-        r2_list = agg[h]["r2"]
+        r2_list   = agg[h]["r2"]
 
         summary[f"h{h}"] = {
-            "mean_mae": sum(mae_list) / len(mae_list) if mae_list else None,
+            "mean_mae":  sum(mae_list)  / len(mae_list)  if mae_list  else None,
             "mean_rmse": sum(rmse_list) / len(rmse_list) if rmse_list else None,
-            "mean_r2": sum(r2_list) / len(r2_list) if r2_list else None,
+            "mean_r2":   sum(r2_list)   / len(r2_list)   if r2_list   else None,
             "n_days": len(agg[h]["dates"]),
-            "dates": agg[h]["dates"]
+            "dates":  agg[h]["dates"]
         }
 
         if agg[h]["dates"]:
@@ -1814,20 +1617,16 @@ def ned_mlr_backtest_forecasted(start_date: str = None, end_date: str = None):
 
 
 # -------------------------------
-# Bootstrap archive (archief initiel vullen)
+# Bootstrap archive
 # -------------------------------
 @service
 def ned_mlr_bootstrap_archive(days: int = 14):
     """
     Bouwt het archief alsof predict_7d de afgelopen 'days' dagen al gedraaid had.
-    Elke anchor-dag levert 7 horizons op (H1..H7).
-    Bij ontbrekende forecast-features worden lege horizons toegevoegd,
-    zodat de archiefstructuur altijd consistent blijft.
     """
-
     log.info(f"ned_mlr_bootstrap_archive: start voor {days} dagen")
 
-    # --- Load coefficients ---
+    # --- Load coefficients from file ---
     coef = _get_coef()
     if coef is None:
         log.error("Geen coef; run eerst pyscript.ned_mlr_train")
@@ -1850,13 +1649,11 @@ def ned_mlr_bootstrap_archive(days: int = 14):
     tz = ZoneInfo("Europe/Amsterdam")
     today = datetime.now(tz=tz).date()
 
-    # --- Loop over anchors in het verleden ---
     for offset in range(days, 0, -1):
         anchor_day = today - timedelta(days=offset)
         anchor_iso = anchor_day.isoformat()
         log.info(f"Bootstrap anchor {anchor_iso}")
 
-        # --- Forecast range ---
         sdate = anchor_day.isoformat()
         edate = (anchor_day + timedelta(days=7)).isoformat()
 
@@ -1879,7 +1676,6 @@ def ned_mlr_bootstrap_archive(days: int = 14):
         # --- Als features ontbreken → lege horizons toevoegen ---
         if not solar15 or not won15 or not wof15:
             log.warning(f"Anchor {anchor_iso}: onvolledige features, maar dag wordt wel aangemaakt")
-
             for h in range(1, 8):
                 pred_date = anchor_day + timedelta(days=h-1)
                 day_key = pred_date.isoformat()
@@ -1890,44 +1686,45 @@ def ned_mlr_bootstrap_archive(days: int = 14):
         solar15 = _canonicalize_dict_keys(solar15)
         won15   = _canonicalize_dict_keys(won15)
         wof15   = _canonicalize_dict_keys(wof15)
-        cons15  = _canonicalize_dict_keys(cons15)
+        cons15  = _canonicalize_dict_keys(cons15 if cons15 else _zero_cons(solar15, won15, wof15))
 
         # --- Historical seed (yesterday) ---
         hist_start = anchor_day - timedelta(days=1)
         h_sdate = hist_start.isoformat()
         h_edate = anchor_day.isoformat()
 
-        hist_solar = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, SOLAR_TYPE_ID, act_prov, gran15, tz_id, [point_nl], cls_hist))
-        hist_won   = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, WIND_ON_TYPE_ID, act_prov, gran15, tz_id, [point_nl, 36, 14], cls_hist))
-        hist_wof   = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, WIND_OFF_TYPE_ID, act_prov, gran15, tz_id, [point_nl, 36, 14], cls_hist))
-        hist_cons  = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, CONSUMPTION_TYPE_ID, act_cons, gran15, tz_id, [point_nl], cls_hist)) if act_cons else {}
+        hist_solar  = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, SOLAR_TYPE_ID, act_prov, gran15, tz_id, [point_nl], cls_hist))
+        hist_won    = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, WIND_ON_TYPE_ID, act_prov, gran15, tz_id, [point_nl, 36, 14], cls_hist))
+        hist_wof    = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, WIND_OFF_TYPE_ID, act_prov, gran15, tz_id, [point_nl, 36, 14], cls_hist))
+        hist_cons   = _canonicalize_dict_keys(fetch_ned_q15_range(h_sdate, h_edate, CONSUMPTION_TYPE_ID, act_cons, gran15, tz_id, [point_nl], cls_hist)) if act_cons else {}
+        hist_prices = _canonicalize_dict_keys(fetch_entsoe_prices_q15_range_api(h_sdate, h_edate, eic_code=EIC_NL))
 
-        # --- Feature matrix ---
+        # --- Feature matrix (prices=None; lags worden manueel gezaaid) ---
         idx, Xf = build_feature_matrix_q15(solar15, won15, wof15, cons15)
 
-        def _last(d):
-            if not d:
-                return 0.0
-            ks = sorted(d.keys())
-            return d[ks[-1]]
-
-        seed = [
+        # --- Seed eerste rij vanuit gisteren ---
+        seed_features = [
             _last(hist_solar),
             _last(hist_won),
             _last(hist_wof),
-            _last(hist_cons) if hist_cons else 0.0
+            _last(hist_cons) if hist_cons else 0.0,
         ]
+        seed_price = _last(hist_prices)
 
+        # Row layout: [solar(0), won(1), wof(2), cons(3), sin_tod(4), cos_tod(5),
+        #              lag_solar(6), lag_won(7), lag_wof(8), lag_cons(9), lag_price(10)]
+        Xf[0][6:10] = seed_features
+        Xf[0][10]   = seed_price
+
+        # --- Autoregressive prediction loop ---
+        yhat_eur_mwh = []
         for i in range(len(Xf)):
-            if i == 0:
-                for j in range(4, len(Xf[i])):
-                    Xf[i][j] = seed[j - 4]
-            else:
-                for j in range(4, len(Xf[i])):
-                    Xf[i][j] = Xf[i - 1][j - 4]
-
-        # --- Predict ---
-        yhat_eur_mwh = ols_predict(Xf, coef, add_intercept=True)
+            if i > 0:
+                for j in range(4):
+                    Xf[i][6 + j] = Xf[i-1][j]
+                Xf[i][10] = yhat_eur_mwh[i-1]
+            pred = ols_predict([Xf[i]], coef, add_intercept=True)[0]
+            yhat_eur_mwh.append(pred)
 
         # --- Archive per horizon ---
         for i, ts in enumerate(idx):
@@ -1952,7 +1749,7 @@ def ned_mlr_bootstrap_archive(days: int = 14):
     log.info("ned_mlr_bootstrap_archive: klaar")
 
 # -------------------------------
-# archief leeggooien
+# Archief leeggooien
 # -------------------------------
 @service
 def ned_mlr_reset_forecast_archive():
