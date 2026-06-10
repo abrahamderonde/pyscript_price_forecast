@@ -1,5 +1,7 @@
 # Pyscript for Spot price prediction
 
+## Depricated!
+
 > A multi-linear regression model to predict spot energy prices in the netherlands.
 > Uses NED.nl data (wind, solar, consumption), time of day and historic prices to predict new prices. 
 
